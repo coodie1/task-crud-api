@@ -1,3 +1,4 @@
+# Readme is created using AI
 # Task CRUD API
 
 A clean, production-ready in-memory **CRUD API** for managing a to-do list built with **FastAPI**, featuring automatic OpenAPI / Swagger UI documentation, strict input validation, and standard HTTP status codes.
