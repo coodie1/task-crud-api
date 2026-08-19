@@ -1,7 +1,11 @@
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Body, Path
 from fastapi.responses import JSONResponse, Response
 
-app = FastAPI(title="Task API", version="1.0")
+app = FastAPI(
+    title="Task API",
+    version="1.0",
+    description="A simple in-memory CRUD API for managing a to-do list built with FastAPI."
+)
 
 # In-memory list of task objects
 tasks = [
@@ -10,36 +14,36 @@ tasks = [
     {"id": 3, "title": "Complete assignment", "done": False},
 ]
 
-@app.get("/")
+@app.get("/", summary="Get API Metadata", tags=["General"])
 def read_root():
-    """Root endpoint providing API metadata."""
+    """Returns metadata about the Task API, including name, version, and endpoints."""
     return {
         "name": "Task API",
         "version": "1.0",
         "endpoints": ["/tasks"]
     }
 
-@app.get("/health")
+@app.get("/health", summary="Health Check", tags=["General"])
 def health_check():
-    """Health check endpoint to verify server is running."""
+    """Health check endpoint to verify that the server is alive and responding."""
     return {"status": "ok"}
 
-@app.get("/tasks")
+@app.get("/tasks", summary="List All Tasks", tags=["Tasks"])
 def get_tasks():
-    """List all tasks."""
+    """Retrieve all tasks from the in-memory store."""
     return tasks
 
-@app.get("/tasks/{id}")
-def get_task(id: int):
-    """Get a single task by ID."""
+@app.get("/tasks/{id}", summary="Get Task by ID", tags=["Tasks"])
+def get_task(id: int = Path(..., description="The unique numerical identifier of the task")):
+    """Retrieve a single task by its unique ID. Returns 404 if the task does not exist."""
     for task in tasks:
         if task["id"] == id:
             return task
     return JSONResponse(status_code=404, content={"error": f"Task {id} not found"})
 
-@app.post("/tasks", status_code=201)
-def create_task(task_data: dict = Body(default=None)):
-    """Create a new task with validation."""
+@app.post("/tasks", status_code=201, summary="Create Task", tags=["Tasks"])
+def create_task(task_data: dict = Body(default=None, example={"title": "Buy milk"})):
+    """Create a new task. Requires a JSON body with a non-empty 'title'. Sets 'done' to false by default."""
     if task_data is None or not isinstance(task_data, dict):
         return JSONResponse(status_code=400, content={"error": "Request body must be a valid JSON object"})
     
@@ -56,9 +60,12 @@ def create_task(task_data: dict = Body(default=None)):
     tasks.append(new_task)
     return JSONResponse(status_code=201, content=new_task)
 
-@app.put("/tasks/{id}")
-def update_task(id: int, task_data: dict = Body(default=None)):
-    """Update a task's title and/or done status."""
+@app.put("/tasks/{id}", summary="Update Task", tags=["Tasks"])
+def update_task(
+    id: int = Path(..., description="The unique numerical identifier of the task to update"),
+    task_data: dict = Body(default=None, example={"title": "Buy organic milk", "done": True})
+):
+    """Replace/update a task's title and/or done status. Returns 404 if not found, 400 for invalid body."""
     task = next((t for t in tasks if t["id"] == id), None)
     if not task:
         return JSONResponse(status_code=404, content={"error": f"Task {id} not found"})
@@ -79,9 +86,9 @@ def update_task(id: int, task_data: dict = Body(default=None)):
         
     return task
 
-@app.delete("/tasks/{id}", status_code=204)
-def delete_task(id: int):
-    """Delete a task by ID."""
+@app.delete("/tasks/{id}", status_code=204, summary="Delete Task", tags=["Tasks"])
+def delete_task(id: int = Path(..., description="The unique numerical identifier of the task to delete")):
+    """Delete a task by ID. Returns status 204 with empty body on success, 404 if not found."""
     global tasks
     task = next((t for t in tasks if t["id"] == id), None)
     if not task:
@@ -89,6 +96,4 @@ def delete_task(id: int):
     
     tasks = [t for t in tasks if t["id"] != id]
     return Response(status_code=204)
-
-
 
