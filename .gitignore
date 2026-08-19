@@ -1,0 +1,5 @@
+fast.venv/
+__pycache__/
+*.pyc
+ai-version/venv/
+.DS_Store
