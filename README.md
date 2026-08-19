@@ -6,10 +6,16 @@ A clean, production-ready in-memory **CRUD API** for managing a to-do list built
 
 ## 🚀 Quickstart & How to Run
 
-### One-line Command to Install and Run
-```bash
-python -m pip install fastapi "uvicorn[standard]" requests pydantic && uvicorn main:app --reload --port 8000
+### Run with Virtual Environment (Windows)
+```powershell
+.\fast.venv\Scripts\uvicorn.exe main:app --reload --port 8000
 ```
+
+### Or using Python module directly
+```bash
+python -m uvicorn main:app --reload --port 8000
+```
+
 
 Once running, interactive API docs are available at:
 - **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
