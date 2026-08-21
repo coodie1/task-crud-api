@@ -1,46 +1,52 @@
 """
-AI-generated version of the SQLite Task CRUD API (W3 Stage 6 AI Rematch quarantine).
+AI-generated containerized Postgres version (A3 Stage 6 AI Rematch).
 """
 
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional, List
-import sqlite3
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
-DB_PATH = "ai_tasks.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgres://postgres:dev@localhost:5432/tasks")
 
-app = FastAPI(title="Task API AI SQLite Version")
-
-
-def get_ai_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+app = FastAPI(title="Task API AI Postgres Stack")
 
 
-def init_ai_db():
-    conn = get_ai_db()
+def get_db():
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+
+def init_db():
+    conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            done BOOLEAN NOT NULL DEFAULT 0
-        )
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            done BOOLEAN NOT NULL DEFAULT FALSE
+        );
     """)
-    cursor.execute("SELECT COUNT(*) FROM tasks")
-    if cursor.fetchone()[0] == 0:
-        example_tasks = [
-            ("Buy groceries", 0),
-            ("Read a book", 1),
-            ("Complete assignment", 0),
-        ]
-        cursor.executemany("INSERT INTO tasks (title, done) VALUES (?, ?)", example_tasks)
+    cursor.execute("SELECT COUNT(*) AS count FROM tasks")
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("""
+            INSERT INTO tasks (title, done) VALUES
+            ('Buy groceries', FALSE),
+            ('Read a book', TRUE),
+            ('Complete assignment', FALSE);
+        """)
     conn.commit()
+    cursor.close()
     conn.close()
 
 
-init_ai_db()
+@app.on_event("startup")
+def on_startup():
+    try:
+        init_db()
+    except Exception:
+        pass
 
 
 class TaskCreate(BaseModel):
@@ -54,7 +60,7 @@ class TaskUpdate(BaseModel):
 
 @app.get("/")
 def get_root():
-    return {"name": "Task API", "version": "2.0", "endpoints": ["/tasks"]}
+    return {"name": "Task API", "version": "3.0", "endpoints": ["/tasks"]}
 
 
 @app.get("/health")
@@ -64,19 +70,25 @@ def get_health():
 
 @app.get("/tasks")
 def get_all_tasks():
-    conn = get_ai_db()
-    rows = conn.execute("SELECT * FROM tasks").fetchall()
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, done FROM tasks ORDER BY id ASC")
+    rows = cursor.fetchall()
+    cursor.close()
     conn.close()
     return [{"id": r["id"], "title": r["title"], "done": bool(r["done"])} for r in rows]
 
 
 @app.get("/tasks/{id}")
 def get_single_task(id: int):
-    conn = get_ai_db()
-    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (id,)).fetchone()
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = %s", (id,))
+    row = cursor.fetchone()
+    cursor.close()
     conn.close()
     if not row:
-        raise HTTPException(status_code=404, detail=f"Task {id} not found")
+        raise HTTPException(status_code=404, detail="Task not found")
     return {"id": row["id"], "title": row["title"], "done": bool(row["done"])}
 
 
@@ -84,39 +96,55 @@ def get_single_task(id: int):
 def create_new_task(task_input: TaskCreate):
     if not task_input.title.strip():
         raise HTTPException(status_code=400, detail="Title cannot be empty")
-    conn = get_ai_db()
-    cursor = conn.execute("INSERT INTO tasks (title, done) VALUES (?, ?)", (task_input.title.strip(), 0))
-    new_id = cursor.lastrowid
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id, title, done",
+        (task_input.title.strip(), False)
+    )
+    new_row = cursor.fetchone()
     conn.commit()
+    cursor.close()
     conn.close()
-    return {"id": new_id, "title": task_input.title.strip(), "done": False}
+    return {"id": new_row["id"], "title": new_row["title"], "done": bool(new_row["done"])}
 
 
 @app.put("/tasks/{id}")
 def update_existing_task(id: int, task_input: TaskUpdate):
-    conn = get_ai_db()
-    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (id,)).fetchone()
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = %s", (id,))
+    row = cursor.fetchone()
     if not row:
+        cursor.close()
         conn.close()
-        raise HTTPException(status_code=404, detail=f"Task {id} not found")
+        raise HTTPException(status_code=404, detail="Task not found")
 
     title = task_input.title.strip() if task_input.title is not None else row["title"]
-    done = int(task_input.done) if task_input.done is not None else row["done"]
+    done = task_input.done if task_input.done is not None else row["done"]
 
-    conn.execute("UPDATE tasks SET title = ?, done = ? WHERE id = ?", (title, done, id))
+    cursor.execute(
+        "UPDATE tasks SET title = %s, done = %s WHERE id = %s RETURNING id, title, done",
+        (title, done, id)
+    )
+    updated = cursor.fetchone()
     conn.commit()
+    cursor.close()
     conn.close()
-    return {"id": id, "title": title, "done": bool(done)}
+    return {"id": updated["id"], "title": updated["title"], "done": bool(updated["done"])}
 
 
 @app.delete("/tasks/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_existing_task(id: int):
-    conn = get_ai_db()
-    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (id,)).fetchone()
-    if not row:
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM tasks WHERE id = %s", (id,))
+    if not cursor.fetchone():
+        cursor.close()
         conn.close()
-        raise HTTPException(status_code=404, detail=f"Task {id} not found")
-    conn.execute("DELETE FROM tasks WHERE id = ?", (id,))
+        raise HTTPException(status_code=404, detail="Task not found")
+    cursor.execute("DELETE FROM tasks WHERE id = %s", (id,))
     conn.commit()
+    cursor.close()
     conn.close()
     return None
