@@ -73,9 +73,15 @@ test("PUT /tasks/1 (bad done type)", requests.put(f"{BASE}/tasks/1", json={"done
 
 # --- Delete ---
 print("\n--- Delete Endpoint ---")
-test("DELETE /tasks/2 (exists)", requests.delete(f"{BASE}/tasks/2"), 204)
-test("GET /tasks/2 (after delete)", requests.get(f"{BASE}/tasks/2"), 404)
+del_req = requests.post(f"{BASE}/tasks", json={"title": "Task to be deleted"})
+del_id = del_req.json().get("id") if del_req.status_code == 201 else None
+if del_id:
+    test(f"DELETE /tasks/{del_id} (exists)", requests.delete(f"{BASE}/tasks/{del_id}"), 204)
+    test(f"GET /tasks/{del_id} (after delete)", requests.get(f"{BASE}/tasks/{del_id}"), 404)
+else:
+    test("DELETE /tasks/2 (exists)", requests.delete(f"{BASE}/tasks/2"), 204)
 test("DELETE /tasks/999 (not found)", requests.delete(f"{BASE}/tasks/999"), 404)
+
 
 # --- SQL Extras (Search, Filter, Stats) ---
 print("\n--- SQL Extras ---")
