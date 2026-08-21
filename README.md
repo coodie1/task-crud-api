@@ -1,49 +1,91 @@
-# Task CRUD API — SQLite Database Edition
+# Task CRUD API — PostgreSQL & Docker Stack
 
-A production-ready **Task CRUD API** built with **FastAPI** and backed by a persistent **SQLite database (`tasks.db`)**, maintaining the exact same RESTful contract while persisting data across server restarts.
+A production-ready **Task CRUD API** built with **FastAPI**, containerized with **Docker**, orchestrated with **Docker Compose**, and backed by a **PostgreSQL** database with volume persistence and optional **Redis** caching.
 
 ---
 
-## 💡 About this Assignment (W3 · A1)
+## 🎯 Architecture Overview
 
-In Assignment 1 (Week 2), task data lived solely in volatile memory and vanished whenever the server stopped. In this assignment, we migrated the storage layer to **SQLite** without changing any external API contracts.
+This project demonstrates the power of clean layered architecture using the **Repository Pattern**:
+- **API & Routes (`main.py`)**: Defines HTTP endpoints, validates client requests, and returns standard HTTP status codes. **Routes remain completely unchanged** regardless of storage backend.
+- **Repository Layer (`repository.py`)**: Implements `TaskRepository` interface supporting both:
+  - `PostgresTaskRepository`: PostgreSQL with parameterized queries (`%s`), transactions, and connection management.
+  - `SqliteTaskRepository`: SQLite with `sqlite3` for local standalone development.
+- **Infrastructure (`docker-compose.yml`)**:
+  - `app`: FastAPI service running on port `8000`.
+  - `db`: PostgreSQL 15 container with persistent volume (`pgdata`) and `init.sql` schema initialization.
+  - `redis`: Redis 7 container for high-speed caching and queues.
 
-### Why SQLite was Chosen
-- **Zero Configuration**: SQLite is a serverless, self-contained relational database embedded directly in Python's standard library (`sqlite3`). No external database daemon or setup required.
-- **Single File Storage**: All tables, schema, and rows reside in a single portable file (`tasks.db`) in the project root.
-- **ACID Compliant**: Full transactional integrity for `INSERT`, `UPDATE`, and `DELETE` queries.
-- **Clean Separation of Concerns**: Proves that APIs describe *what* your application does, while databases describe *where* your application stores its data.
-
-### Where the Database is Stored
-The database file is automatically created on first startup at:
-```text
-./tasks.db (in the project root directory)
 ```
-If `tasks.db` does not exist or the `tasks` table is empty, the application automatically creates the schema and seeds 3 initial example tasks. Subsequent restarts preserve all modified and created records.
+Client ──► FastAPI Router (main.py) ──► TaskRepository (repository.py) ──► PostgreSQL (tasks_db)
+                                                                       └──► Redis (Cache)
+```
 
 ---
 
-## 🚀 Quickstart & How to Run
+## 🚀 Quickstart: Run the Whole Stack with One Command
 
-### Run Server (PowerShell / Windows)
+### Option 1: Run with Docker Compose (Recommended)
+Start the entire stack (FastAPI + PostgreSQL + Redis):
+```bash
+docker compose up --build
+```
+To run in the background (detached mode):
+```bash
+docker compose up -d
+```
+
+### Option 2: Run Standalone Locally (Without Docker)
 ```powershell
+# Windows PowerShell
 .\fast.venv\Scripts\uvicorn.exe main:app --reload --port 8000
 ```
-
-### Run Server (Universal Python)
 ```bash
+# Universal Python
 python -m uvicorn main:app --reload --port 8000
 ```
 
-### Run Automated Tests (26 Tests)
-```bash
-python test_api.py
+---
+
+## ⚙️ Environment Configuration (`.env`)
+
+Configuration is managed via `.env` (gitignored, template provided in `.env.example`):
+
+```env
+# PostgreSQL connection string in Docker:
+DATABASE_URL=postgresql://postgres:postgres@db:5432/tasks_db
+
+# Local development fallback (SQLite):
+# DATABASE_URL=sqlite:///tasks.db
+
+# Optional Redis URL:
+REDIS_URL=redis://redis:6379/0
 ```
 
-### Interactive Documentation
-- **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
-- **OpenAPI JSON**: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
+---
+
+## 💾 Proving Persistence Across Restarts
+
+Data persistence is verified using a named Docker volume (`pgdata:/var/lib/postgresql/data`):
+
+1. **Start the containers**:
+   ```bash
+   docker compose up -d
+   ```
+2. **Create a new task**:
+   ```bash
+   curl -X POST http://localhost:8000/tasks -H "Content-Type: application/json" -d "{\"title\": \"Persistent Task\"}"
+   ```
+3. **Restart the containers**:
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
+4. **Verify data survived**:
+   ```bash
+   curl http://localhost:8000/tasks
+   ```
+   *The task is still present because the PostgreSQL data volume outlives container lifecycles.*
 
 ---
 
@@ -52,128 +94,39 @@ python test_api.py
 | HTTP Verb | Endpoint | Status Codes | Description | Query / Body Parameters |
 | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/` | `200 OK` | API root metadata | _None_ |
-| `GET` | `/health` | `200 OK` | Server health check (`{"status": "ok"}`) | _None_ |
-| `GET` | `/tasks` | `200 OK` | List tasks (supports search & filter) | `?done=true`, `?search=milk`, `?sort=title` |
+| `GET` | `/health` | `200 OK` | Health check + DB & Redis ping | _None_ |
+| `GET` | `/tasks` | `200 OK` | List tasks with filter/search/sort | `?done=true`, `?search=milk`, `?sort=title` |
 | `GET` | `/tasks/{id}` | `200 OK` / `404 Not Found` | Retrieve single task by ID | Path parameter `id` |
-| `POST` | `/tasks` | `201 Created` / `400 Bad Request` | Insert new task into database | Body: `{"title": "Buy milk"}` |
-| `PUT` | `/tasks/{id}` | `200 OK` / `400 Bad Request` / `404 Not Found` | Update task title and/or done status | Body: `{"title": "...", "done": true}` |
-| `DELETE` | `/tasks/{id}` | `204 No Content` / `404 Not Found` | Delete task from database | Path parameter `id` |
-| `GET` | `/stats` | `200 OK` | Task count statistics via SQL `COUNT()` | _None_ |
+| `POST` | `/tasks` | `201 Created` / `400 Bad Request` | Insert new task | Body: `{"title": "Buy milk"}` |
+| `PUT` | `/tasks/{id}` | `200 OK` / `400 Bad Request` / `404 Not Found` | Update task title / status | Body: `{"title": "...", "done": true}` |
+| `DELETE` | `/tasks/{id}` | `204 No Content` / `404 Not Found` | Delete task | Path parameter `id` |
+| `GET` | `/stats` | `200 OK` | Aggregate statistics via SQL `COUNT()` | _None_ |
 
 ---
 
-## 🗄️ SQL Schema & Queries Executed
+## 🧪 Automated Test Suite (26 Tests)
 
-### Database Table Schema
-```sql
-CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    done BOOLEAN NOT NULL DEFAULT 0
-);
+Run the test suite against the running API:
+```bash
+python test_api.py
 ```
-
-### Core SQL Queries Used by the API
-1. **List all tasks**:
-   ```sql
-   SELECT * FROM tasks ORDER BY id ASC;
-   ```
-2. **Filter completed tasks**:
-   ```sql
-   SELECT * FROM tasks WHERE done = 1;
-   ```
-3. **Search by keyword**:
-   ```sql
-   SELECT * FROM tasks WHERE title LIKE '%groceries%';
-   ```
-4. **Get task by ID**:
-   ```sql
-   SELECT * FROM tasks WHERE id = ?;
-   ```
-5. **Insert new task**:
-   ```sql
-   INSERT INTO tasks (title, done) VALUES (?, ?);
-   ```
-6. **Update task**:
-   ```sql
-   UPDATE tasks SET title = ?, done = ? WHERE id = ?;
-   ```
-7. **Delete task**:
-   ```sql
-   DELETE FROM tasks WHERE id = ?;
-   ```
-8. **Count & Aggregate statistics**:
-   ```sql
-   SELECT COUNT(*) FROM tasks;
-   SELECT COUNT(*) FROM tasks WHERE done = 1;
-   ```
-
----
-
-## 🧪 Sample `curl -i` Outputs
-
-### 1. Insert Task into SQLite (`POST /tasks`)
-```http
-HTTP/1.1 201 Created
-date: Fri, 21 Aug 2026 13:20:00 GMT
-server: uvicorn
-content-length: 44
-content-type: application/json
-
-{"id":4,"title":"Buy milk","done":false}
-```
-
-### 2. Read Single Task (`GET /tasks/1`)
-```http
-HTTP/1.1 200 OK
-date: Fri, 21 Aug 2026 13:20:01 GMT
-server: uvicorn
-content-length: 50
-content-type: application/json
-
-{"id":1,"title":"Buy groceries","done":false}
-```
-
-### 3. Task Statistics (`GET /stats`)
-```http
-HTTP/1.1 200 OK
-date: Fri, 21 Aug 2026 13:20:02 GMT
-server: uvicorn
-content-length: 32
-content-type: application/json
-
-{"total":3,"done":1,"open":2}
+```text
+============================================================
+  Results: 26/26 passed, 0 failed
+============================================================
 ```
 
 ---
 
-## 📸 Swagger UI & Database Documentation
+## 📸 Interactive Documentation
+
+- **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+- **OpenAPI JSON**: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
 
 ![Swagger UI Documentation](swagger_screenshot.png)
 
 ---
 
-## 🤖 Stage 6: AI vs Me (Database Migration Rematch)
-
-### The Prompt
-> "Migrate the Task CRUD API in FastAPI to use SQLite with sqlite3. Store tasks in a single database file tasks.db with columns id (INTEGER PRIMARY KEY AUTOINCREMENT), title (TEXT NOT NULL), and done (BOOLEAN NOT NULL DEFAULT 0). Ensure tasks table and 3 seed tasks are created only on first run if empty, and all CRUD endpoints (GET /, GET /health, GET /tasks, GET /tasks/{id}, POST /tasks, PUT /tasks/{id}, DELETE /tasks/{id}) maintain identical behavior and status codes (200, 201, 204, 400, 404) with parameterized queries for safety."
-
-### 3 Concrete Differences Found
-
-1. **Custom Error Format**:
-   - *AI Version*: Raised default `HTTPException` which outputs `{"detail": "..."}`.
-   - *Hand-built Version*: Returned `JSONResponse` with `{"error": "..."}` matching the exact course contract.
-
-2. **Advanced Query Support (Filter, Search, Sort & Stats)**:
-   - *AI Version*: Only implemented basic `SELECT *` without query parameter handling or SQL aggregate statistics.
-   - *Hand-built Version*: Added `WHERE title LIKE ?` for search, `WHERE done = ?` for status filtering, `ORDER BY` sorting, and `COUNT(*)` SQL aggregation in `/stats`.
-
-3. **OpenAPI / Swagger Annotations & Docstrings**:
-   - *AI Version*: Minimal route signatures without path parameter descriptions or rich metadata.
-   - *Hand-built Version*: Added full OpenAPI tags, summaries, `Path(...)` metadata, and examples.
-
----
-
 ## 👤 Author
 **coodie1** (`umairarif946@gmail.com`)
-

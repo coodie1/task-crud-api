@@ -4,3 +4,4 @@ __pycache__/
 ai-version/venv/
 .DS_Store
 *.db
+.env
