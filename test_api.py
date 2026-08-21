@@ -77,6 +77,13 @@ test("DELETE /tasks/2 (exists)", requests.delete(f"{BASE}/tasks/2"), 204)
 test("GET /tasks/2 (after delete)", requests.get(f"{BASE}/tasks/2"), 404)
 test("DELETE /tasks/999 (not found)", requests.delete(f"{BASE}/tasks/999"), 404)
 
+# --- SQL Extras (Search, Filter, Stats) ---
+print("\n--- SQL Extras ---")
+test("GET /stats", requests.get(f"{BASE}/stats"), 200)
+test("GET /tasks?done=true", requests.get(f"{BASE}/tasks?done=true"), 200)
+test("GET /tasks?search=groceries", requests.get(f"{BASE}/tasks?search=groceries"), 200)
+test("GET /tasks?sort=title", requests.get(f"{BASE}/tasks?sort=title"), 200)
+
 # --- Summary ---
 print("\n" + "=" * 60)
 total = passed + failed

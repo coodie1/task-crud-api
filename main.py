@@ -71,13 +71,51 @@ def health_check():
     """Health check endpoint to verify that the server is alive and responding."""
     return {"status": "ok"}
 
+from typing import Optional
+
 @app.get("/tasks", summary="List All Tasks", tags=["Tasks"])
-def get_tasks():
-    """Retrieve all tasks from the SQLite database."""
+def get_tasks(
+    done: Optional[bool] = None,
+    search: Optional[str] = None,
+    sort: Optional[str] = None
+):
+    """Retrieve tasks with optional SQL filtering, search, and sorting."""
     conn = get_db()
-    rows = conn.execute("SELECT * FROM tasks").fetchall()
+    query = "SELECT * FROM tasks WHERE 1=1"
+    params = []
+
+    if done is not None:
+        query += " AND done = ?"
+        params.append(1 if done else 0)
+
+    if search:
+        query += " AND title LIKE ?"
+        params.append(f"%{search}%")
+
+    if sort == "title":
+        query += " ORDER BY title ASC"
+    elif sort == "-title":
+        query += " ORDER BY title DESC"
+    else:
+        query += " ORDER BY id ASC"
+
+    rows = conn.execute(query, params).fetchall()
     conn.close()
     return [row_to_dict(r) for r in rows]
+
+@app.get("/stats", summary="Task Statistics", tags=["General"])
+def get_stats():
+    """Returns task statistics calculated using SQL COUNT aggregate queries."""
+    conn = get_db()
+    total = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+    done_count = conn.execute("SELECT COUNT(*) FROM tasks WHERE done = 1").fetchone()[0]
+    open_count = conn.execute("SELECT COUNT(*) FROM tasks WHERE done = 0").fetchone()[0]
+    conn.close()
+    return {
+        "total": total,
+        "done": done_count,
+        "open": open_count
+    }
 
 @app.get("/tasks/{id}", summary="Get Task by ID", tags=["Tasks"])
 def get_task(id: int = Path(..., description="The unique numerical identifier of the task")):
@@ -88,6 +126,7 @@ def get_task(id: int = Path(..., description="The unique numerical identifier of
     if row is None:
         return JSONResponse(status_code=404, content={"error": f"Task {id} not found"})
     return row_to_dict(row)
+
 
 @app.post("/tasks", status_code=201, summary="Create Task", tags=["Tasks"])
 def create_task(task_data: dict = Body(default=None, examples=[{"title": "Buy milk"}])):
