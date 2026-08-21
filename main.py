@@ -1,25 +1,56 @@
-from fastapi import FastAPI, Body, Path
+from fastapi import FastAPI, Body, Path, Depends, Request
 from fastapi.responses import JSONResponse, Response
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from repository import get_repository, ping_redis
+from auth_service import AuthService
 
 app = FastAPI(
-    title="Task API",
-    version="3.0",
-    description="A multi-backend CRUD API for managing a to-do list, backed by PostgreSQL (Docker) and SQLite repositories."
+    title="Task API with Auth",
+    version="4.0",
+    description="A secure CRUD API backed by PostgreSQL/SQLite and protected with Supabase JWT Bearer Authentication."
 )
 
 repo = get_repository()
+security = HTTPBearer(auto_error=False)
 
+
+# --- Reusable Auth Dependency (Middleware Guard) ---
+def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> dict:
+    """Reusable middleware/dependency that extracts and verifies Bearer JWT tokens."""
+    if not credentials or not credentials.credentials:
+        # Return 401 with JSON error when header is missing or malformed
+        raise AuthenticationError("Access token required")
+
+    token = credentials.credentials
+    try:
+        user = AuthService.verify_token(token)
+        return user
+    except Exception:
+        raise AuthenticationError("Invalid or expired token")
+
+
+class AuthenticationError(Exception):
+    def __init__(self, message: str):
+        self.message = message
+
+
+@app.exception_handler(AuthenticationError)
+async def auth_exception_handler(request: Request, exc: AuthenticationError):
+    return JSONResponse(status_code=401, content={"error": exc.message})
+
+
+# --- General / Public Endpoints ---
 
 @app.get("/", summary="Get API Metadata", tags=["General"])
 def read_root():
     """Returns metadata about the Task API, including name, version, and endpoints."""
     return {
         "name": "Task API",
-        "version": "3.0",
-        "endpoints": ["/tasks"]
+        "version": "4.0",
+        "endpoints": ["/auth/signup", "/auth/login", "/auth/logout", "/public/info", "/protected/profile", "/tasks"]
     }
+
 
 
 @app.get("/health", summary="Health Check", tags=["General"])
@@ -29,9 +60,102 @@ def health_check():
     return {
         "status": "ok",
         "database": "connected",
-        "redis": redis_info["status"]
+        "redis": redis_info.get("status", "unavailable")
     }
 
+
+@app.get("/public/info", summary="Public Information", tags=["Public"])
+def public_info():
+    """Public lobby endpoint open to all unauthenticated users."""
+    return {"message": "Welcome stranger! This info is public."}
+
+
+# --- Authentication Endpoints ---
+
+@app.post("/auth/signup", status_code=201, summary="User Sign Up", tags=["Auth"])
+def sign_up(payload: dict = Body(default=None, examples=[{"email": "test@example.com", "password": "password123"}])):
+    """Register a new user account."""
+    if not payload or not isinstance(payload, dict):
+        return JSONResponse(status_code=400, content={"error": "Request body must be a valid JSON object"})
+
+    email = payload.get("email")
+    password = payload.get("password")
+
+    if not email or not isinstance(email, str) or not email.strip():
+        return JSONResponse(status_code=400, content={"error": "Email is required"})
+    if not password or not isinstance(password, str) or not password.strip():
+        return JSONResponse(status_code=400, content={"error": "Password is required"})
+
+    try:
+        user = AuthService.sign_up(email=email.strip(), password=password.strip())
+        return JSONResponse(status_code=201, content=user)
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/auth/login", summary="User Login", tags=["Auth"])
+def sign_in(payload: dict = Body(default=None, examples=[{"email": "test@example.com", "password": "password123"}])):
+    """Authenticate with email and password to receive a JWT access token."""
+    if not payload or not isinstance(payload, dict):
+        return JSONResponse(status_code=400, content={"error": "Request body must be a valid JSON object"})
+
+    email = payload.get("email")
+    password = payload.get("password")
+
+    if not email or not isinstance(email, str) or not email.strip():
+        return JSONResponse(status_code=400, content={"error": "Email is required"})
+    if not password or not isinstance(password, str) or not password.strip():
+        return JSONResponse(status_code=400, content={"error": "Password is required"})
+
+    try:
+        auth_data = AuthService.sign_in(email=email.strip(), password=password.strip())
+        return JSONResponse(status_code=200, content=auth_data)
+    except Exception:
+        return JSONResponse(status_code=401, content={"error": "Invalid login credentials"})
+
+
+@app.post("/auth/logout", status_code=204, summary="User Logout", tags=["Auth"])
+def sign_out(user: dict = Depends(get_current_user), credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """End the authenticated session (protected by Bearer token)."""
+    if credentials and credentials.credentials:
+        AuthService.sign_out(credentials.credentials)
+    return Response(status_code=204)
+
+
+# --- Protected Endpoints ---
+
+@app.get("/protected/profile", summary="User Profile", tags=["Protected"])
+def get_profile(user: dict = Depends(get_current_user)):
+    """Retrieve private user profile details (ID, email, created date)."""
+    return {
+        "id": user.get("id"),
+        "email": user.get("email"),
+        "created_at": user.get("created_at")
+    }
+
+
+@app.get("/protected/dashboard", summary="User Dashboard", tags=["Protected"])
+def get_dashboard(user: dict = Depends(get_current_user)):
+    """Second protected endpoint demonstrating auth dependency reuse."""
+    return {
+        "message": f"Welcome back, {user.get('email')}!",
+        "user_id": user.get("id"),
+        "status": "authorized"
+    }
+
+
+@app.get("/protected/admin", summary="Admin Only (403 Demo)", tags=["Protected"])
+def admin_only(user: dict = Depends(get_current_user)):
+    """Demonstrates 403 Forbidden distinction for non-admin accounts."""
+    if not user.get("email", "").startswith("admin@"):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Forbidden: Admin access required"}
+        )
+    return {"message": "Welcome, Administrator!"}
+
+
+# --- Task CRUD Endpoints ---
 
 @app.get("/tasks", summary="List All Tasks", tags=["Tasks"])
 def get_tasks(
