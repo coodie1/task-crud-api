@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 ai-version/venv/
 .DS_Store
+*.db
