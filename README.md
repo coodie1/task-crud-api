@@ -153,5 +153,27 @@ content-type: application/json
 
 ---
 
+## 🤖 Stage 6: AI vs Me (Database Migration Rematch)
+
+### The Prompt
+> "Migrate the Task CRUD API in FastAPI to use SQLite with sqlite3. Store tasks in a single database file tasks.db with columns id (INTEGER PRIMARY KEY AUTOINCREMENT), title (TEXT NOT NULL), and done (BOOLEAN NOT NULL DEFAULT 0). Ensure tasks table and 3 seed tasks are created only on first run if empty, and all CRUD endpoints (GET /, GET /health, GET /tasks, GET /tasks/{id}, POST /tasks, PUT /tasks/{id}, DELETE /tasks/{id}) maintain identical behavior and status codes (200, 201, 204, 400, 404) with parameterized queries for safety."
+
+### 3 Concrete Differences Found
+
+1. **Custom Error Format**:
+   - *AI Version*: Raised default `HTTPException` which outputs `{"detail": "..."}`.
+   - *Hand-built Version*: Returned `JSONResponse` with `{"error": "..."}` matching the exact course contract.
+
+2. **Advanced Query Support (Filter, Search, Sort & Stats)**:
+   - *AI Version*: Only implemented basic `SELECT *` without query parameter handling or SQL aggregate statistics.
+   - *Hand-built Version*: Added `WHERE title LIKE ?` for search, `WHERE done = ?` for status filtering, `ORDER BY` sorting, and `COUNT(*)` SQL aggregation in `/stats`.
+
+3. **OpenAPI / Swagger Annotations & Docstrings**:
+   - *AI Version*: Minimal route signatures without path parameter descriptions or rich metadata.
+   - *Hand-built Version*: Added full OpenAPI tags, summaries, `Path(...)` metadata, and examples.
+
+---
+
 ## 👤 Author
 **coodie1** (`umairarif946@gmail.com`)
+
