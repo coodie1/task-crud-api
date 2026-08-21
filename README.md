@@ -1,41 +1,65 @@
-# Task CRUD API — PostgreSQL & Docker Stack
+# Task CRUD API with Supabase Authentication & Docker Stack
 
-A production-ready **Task CRUD API** built with **FastAPI**, containerized with **Docker**, orchestrated with **Docker Compose**, and backed by a **PostgreSQL** database with volume persistence and optional **Redis** caching.
-
----
-
-## 🎯 Architecture Overview
-
-This project demonstrates the power of clean layered architecture using the **Repository Pattern**:
-- **API & Routes (`main.py`)**: Defines HTTP endpoints, validates client requests, and returns standard HTTP status codes. **Routes remain completely unchanged** regardless of storage backend.
-- **Repository Layer (`repository.py`)**: Implements `TaskRepository` interface supporting both:
-  - `PostgresTaskRepository`: PostgreSQL with parameterized queries (`%s`), transactions, and connection management.
-  - `SqliteTaskRepository`: SQLite with `sqlite3` for local standalone development.
-- **Infrastructure (`docker-compose.yml`)**:
-  - `app`: FastAPI service running on port `8000`.
-  - `db`: PostgreSQL 15 container with persistent volume (`pgdata`) and `init.sql` schema initialization.
-  - `redis`: Redis 7 container for high-speed caching and queues.
-
-```
-Client ──► FastAPI Router (main.py) ──► TaskRepository (repository.py) ──► PostgreSQL (tasks_db)
-                                                                       └──► Redis (Cache)
-```
+A production-ready, secure **Task CRUD API** built with **FastAPI**, containerized with **Docker**, backed by **PostgreSQL/SQLite**, and secured with **Supabase Auth & JWT Bearer Token Middleware**.
 
 ---
 
-## 🚀 Quickstart: Run the Whole Stack with One Command
+## 🔐 The Big Idea: Authentication & The Trust Triangle
 
-### Option 1: Run with Docker Compose (Recommended)
-Start the entire stack (FastAPI + PostgreSQL + Redis):
+Secure authentication follows a **trust triangle** between three parties:
+1. **The Client**: Sends credentials (email & password) and receives a signed **JSON Web Token (JWT)**.
+2. **The Identity Provider (Supabase Auth)**: Stores user accounts, securely hashes passwords, issues signed JWTs, and verifies user tokens.
+3. **Your Backend API (FastAPI)**: Never stores or hashes passwords. It extracts the Bearer token from incoming `Authorization: Bearer <token>` headers, verifies the signature, and guards protected endpoints via reusable dependency middleware.
+
+```
+                  ┌───────────────────────────────┐
+                  │   Supabase Auth (IdP)         │
+                  │   - Hashes passwords          │
+                  │   - Issues & verifies JWTs    │
+                  └──────────────▲────────────────┘
+                                 │
+                 1. Login / JWT  │ 3. Verify Token
+                                 │
+┌──────────────┐                 │                 ┌──────────────────────────────┐
+│    Client    ├─────────────────┴────────────────►│  FastAPI Backend             │
+│ (Swagger/UI) │ 2. Request with Bearer <token>   │  - Auth Dependency Guard     │
+└──────────────┘                                   │  - PostgreSQL / SQLite Repo  │
+                                                   └──────────────────────────────┘
+```
+
+---
+
+## ⚙️ Environment Configuration (`.env`)
+
+Secrets are managed via a git-ignored `.env` file. A committed template is available at [`.env.example`](.env.example):
+
+```env
+# Supabase Authentication Secrets
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your_anon_key_here
+
+# Local JWT Secret for standalone verification
+JWT_SECRET=super-secret-auth-key-for-local-jwt-verification-12345
+
+# Database Connection URL (PostgreSQL / SQLite)
+DATABASE_URL=postgresql://postgres:postgres@db:5432/tasks_db
+
+# Optional Redis Connection
+REDIS_URL=redis://redis:6379/0
+```
+
+> **Security Note:** Real API keys are stored solely in `.env` and are strictly git-ignored via `.gitignore`.
+
+---
+
+## 🚀 Quickstart & How to Run
+
+### Option 1: Run with Docker Compose (App + Postgres + Redis)
 ```bash
 docker compose up --build
 ```
-To run in the background (detached mode):
-```bash
-docker compose up -d
-```
 
-### Option 2: Run Standalone Locally (Without Docker)
+### Option 2: Run Standalone Locally
 ```powershell
 # Windows PowerShell
 .\fast.venv\Scripts\uvicorn.exe main:app --reload --port 8000
@@ -45,86 +69,130 @@ docker compose up -d
 python -m uvicorn main:app --reload --port 8000
 ```
 
----
-
-## ⚙️ Environment Configuration (`.env`)
-
-Configuration is managed via `.env` (gitignored, template provided in `.env.example`):
-
-```env
-# PostgreSQL connection string in Docker:
-DATABASE_URL=postgresql://postgres:postgres@db:5432/tasks_db
-
-# Local development fallback (SQLite):
-# DATABASE_URL=sqlite:///tasks.db
-
-# Optional Redis URL:
-REDIS_URL=redis://redis:6379/0
-```
-
----
-
-## 💾 Proving Persistence Across Restarts
-
-Data persistence is verified using a named Docker volume (`pgdata:/var/lib/postgresql/data`):
-
-1. **Start the containers**:
-   ```bash
-   docker compose up -d
-   ```
-2. **Create a new task**:
-   ```bash
-   curl -X POST http://localhost:8000/tasks -H "Content-Type: application/json" -d "{\"title\": \"Persistent Task\"}"
-   ```
-3. **Restart the containers**:
-   ```bash
-   docker compose down
-   docker compose up -d
-   ```
-4. **Verify data survived**:
-   ```bash
-   curl http://localhost:8000/tasks
-   ```
-   *The task is still present because the PostgreSQL data volume outlives container lifecycles.*
-
----
-
-## 📋 API Endpoints
-
-| HTTP Verb | Endpoint | Status Codes | Description | Query / Body Parameters |
-| :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/` | `200 OK` | API root metadata | _None_ |
-| `GET` | `/health` | `200 OK` | Health check + DB & Redis ping | _None_ |
-| `GET` | `/tasks` | `200 OK` | List tasks with filter/search/sort | `?done=true`, `?search=milk`, `?sort=title` |
-| `GET` | `/tasks/{id}` | `200 OK` / `404 Not Found` | Retrieve single task by ID | Path parameter `id` |
-| `POST` | `/tasks` | `201 Created` / `400 Bad Request` | Insert new task | Body: `{"title": "Buy milk"}` |
-| `PUT` | `/tasks/{id}` | `200 OK` / `400 Bad Request` / `404 Not Found` | Update task title / status | Body: `{"title": "...", "done": true}` |
-| `DELETE` | `/tasks/{id}` | `204 No Content` / `404 Not Found` | Delete task | Path parameter `id` |
-| `GET` | `/stats` | `200 OK` | Aggregate statistics via SQL `COUNT()` | _None_ |
-
----
-
-## 🧪 Automated Test Suite (26 Tests)
-
-Run the test suite against the running API:
+### Run Test Suites
 ```bash
+# Auth & Security Test Suite (15 Tests)
+python test_auth.py
+
+# Task CRUD Test Suite (26 Tests)
 python test_api.py
 ```
-```text
-============================================================
-  Results: 26/26 passed, 0 failed
-============================================================
+
+---
+
+## 📋 API Endpoints Reference Table
+
+| HTTP Verb | Endpoint | Status Codes | Auth Required | Description |
+| :--- | :--- | :--- | :---: | :--- |
+| `GET` | `/` | `200 OK` | ❌ None | API Root metadata & available endpoints |
+| `GET` | `/health` | `200 OK` | ❌ None | Health check (reports Database & Redis status) |
+| `GET` | `/public/info` | `200 OK` | ❌ None | Public lobby open to unauthenticated users |
+| `POST` | `/auth/signup` | `201 Created` / `400 Bad Request` | ❌ None | Register a new user account with email & password |
+| `POST` | `/auth/login` | `200 OK` / `400 Bad Request` / `401 Unauthorized` | ❌ None | Authenticate and obtain a signed JWT `access_token` |
+| `POST` | `/auth/logout` | `204 No Content` / `401 Unauthorized` | ✅ `Bearer <token>` | Invalidate current user session |
+| `GET` | `/protected/profile` | `200 OK` / `401 Unauthorized` | ✅ `Bearer <token>` | Retrieve authenticated user's private profile |
+| `GET` | `/protected/dashboard` | `200 OK` / `401 Unauthorized` | ✅ `Bearer <token>` | Second protected endpoint proving middleware reuse |
+| `GET` | `/protected/admin` | `200 OK` / `403 Forbidden` | ✅ `Bearer <token>` | Role-based authorization demo (admin only) |
+| `GET` | `/tasks` | `200 OK` | ❌ None | List all tasks (supports `?done=`, `?search=`, `?sort=`) |
+| `GET` | `/tasks/{id}` | `200 OK` / `404 Not Found` | ❌ None | Retrieve a single task by ID |
+| `POST` | `/tasks` | `201 Created` / `400 Bad Request` | ❌ None | Create a new task |
+| `PUT` | `/tasks/{id}` | `200 OK` / `400 Bad Request` / `404 Not Found` | ❌ None | Update task title and/or status |
+| `DELETE` | `/tasks/{id}` | `204 No Content` / `404 Not Found` | ❌ None | Delete a task by ID |
+| `GET` | `/stats` | `200 OK` | ❌ None | Aggregate statistics via SQL `COUNT()` |
+
+---
+
+## 🔒 401 Unauthorized vs 403 Forbidden
+
+- **`401 Unauthorized`**: *"I don't know who you are."* Returned when the `Authorization` header is missing, malformed, or the JWT token has expired or been forged.
+- **`403 Forbidden`**: *"I know who you are, but you are not allowed in."* Returned when a valid authenticated user attempts to access a resource that requires higher privileges (e.g. `/protected/admin`).
+
+---
+
+## 🧪 Sample `curl -i` Verification Flows
+
+### 1. User Sign Up (`POST /auth/signup`)
+```bash
+curl -i -X POST http://localhost:8000/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email":"student@example.com","password":"password123"}'
+```
+```http
+HTTP/1.1 201 Created
+content-type: application/json
+
+{"id":"096b7978-ecb3-4fe6-bc2c-7389a997ba7e","email":"student@example.com","created_at":"2026-08-21T21:00:00Z"}
+```
+
+### 2. User Log In (`POST /auth/login`)
+```bash
+curl -i -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"student@example.com","password":"password123"}'
+```
+```http
+HTTP/1.1 200 OK
+content-type: application/json
+
+{"access_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...","token_type":"bearer","user":{"email":"student@example.com"}}
+```
+
+### 3. Protected Profile with Bearer Token (`GET /protected/profile`)
+```bash
+curl -i http://localhost:8000/protected/profile \
+  -H "Authorization: Bearer <PASTE_YOUR_ACCESS_TOKEN_HERE>"
+```
+```http
+HTTP/1.1 200 OK
+content-type: application/json
+
+{"id":"096b7978-ecb3-4fe6-bc2c-7389a997ba7e","email":"student@example.com","created_at":"2026-08-21T21:00:00Z"}
+```
+
+### 4. Forged / Tampered Token Rejection (`401 Unauthorized`)
+```bash
+curl -i http://localhost:8000/protected/profile \
+  -H "Authorization: Bearer forged_invalid_token"
+```
+```http
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+
+{"error":"Invalid or expired token"}
 ```
 
 ---
 
-## 📸 Interactive Documentation
+## 📸 Interactive Documentation (Swagger UI with Bearer Auth)
 
 - **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
+  - Features the **Authorize Padlock 🔒** configured via FastAPI's `HTTPBearer` security scheme.
+  - Paste your token once in the Authorize modal to test all protected endpoints interactively.
 - **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 - **OpenAPI JSON**: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
 
 ![Swagger UI Documentation](swagger_screenshot.png)
+
+---
+
+## 🤖 Stage 7: AI vs Me (Secured Auth Rematch)
+
+### The Prompt
+> "Build a secured FastAPI backend with Supabase Auth integration. Create public routes (GET /public/info), auth routes (POST /auth/signup, POST /auth/login, POST /auth/logout), and protected routes (GET /protected/profile, GET /protected/dashboard). Implement a reusable HTTPBearer dependency guard that verifies the token with Supabase and returns 401 with a standard JSON error on missing or invalid tokens."
+
+### 3 Concrete Differences Found
+
+1. **Error Response Standardization**:
+   - *AI Version*: Used default `HTTPException` which outputs `{"detail": "..."}`, violating the expected `{"error": "..."}` JSON format.
+   - *Hand-built Version*: Implemented custom `AuthenticationError` and `@app.exception_handler` returning standard `{"error": "..."}` matching all test suites.
+
+2. **Offline & Standalone Fallback**:
+   - *AI Version*: Hard-crashed if Supabase project credentials were unset or if network requests timed out.
+   - *Hand-built Version*: Graciously handles both Supabase cloud authentication and local signed JWT verification for 100% offline test suite reliability.
+
+3. **HTTPBearer Auto-Error Handling**:
+   - *AI Version*: Relied on `HTTPBearer()` default which returns plain 403/detail errors when no header is passed.
+   - *Hand-built Version*: Configured `HTTPBearer(auto_error=False)` inside a custom dependency to ensure a clean `401 Unauthorized` with `{"error": "Access token required"}`.
 
 ---
 
