@@ -1,0 +1,7 @@
+[
+  {
+    "url": "https://books.toscrape.com/catalogue/non_existent_book_9999/index.html",
+    "status_code": 404,
+    "error": "HTTP 404 received (polite no-retry rule)"
+  }
+]
