@@ -35,9 +35,61 @@ class AuthenticationError(Exception):
         self.message = message
 
 
-@app.exception_handler(AuthenticationError)
-async def auth_exception_handler(request: Request, exc: AuthenticationError):
-    return JSONResponse(status_code=401, content={"error": exc.message})
+from src.llm.schema import TriageInput, TriageResponse
+from src.llm.client import (
+    LLMService,
+    UnprocessableEntityError,
+    GatewayTimeoutError,
+    BadCredentialsError,
+    RateLimitExceededError,
+    LLMProviderError
+)
+
+
+@app.exception_handler(UnprocessableEntityError)
+async def unprocessable_exception_handler(request: Request, exc: UnprocessableEntityError):
+    return JSONResponse(status_code=422, content={"error": str(exc)})
+
+
+@app.exception_handler(GatewayTimeoutError)
+async def timeout_exception_handler(request: Request, exc: GatewayTimeoutError):
+    return JSONResponse(status_code=504, content={"error": str(exc)})
+
+
+@app.exception_handler(BadCredentialsError)
+async def bad_credentials_handler(request: Request, exc: BadCredentialsError):
+    return JSONResponse(status_code=401, content={"error": str(exc)})
+
+
+@app.exception_handler(RateLimitExceededError)
+async def rate_limit_handler(request: Request, exc: RateLimitExceededError):
+    return JSONResponse(status_code=429, content={"error": str(exc)})
+
+
+# --- LLM Triage Endpoint ---
+
+@app.post("/triage", response_model=TriageResponse, summary="Triage Support Message (LLM)", tags=["AI / LLM"])
+def triage_message(payload: dict = Body(default=None, examples=[{"text": "My card was charged twice for invoice 402."}])):
+    """
+    Classify an incoming customer support message into category and urgency using a validated LLM pipeline.
+    Validates input before model call, handles repairs, timeouts, and quarantines on failure.
+    """
+    if payload is None or not isinstance(payload, dict):
+        return JSONResponse(status_code=400, content={"error": "Request body must be a valid JSON object with 'text' field"})
+
+    if "text" not in payload:
+        return JSONResponse(status_code=400, content={"error": "Missing required field 'text'"})
+
+    text_val = payload["text"]
+    if not isinstance(text_val, str) or not text_val.strip():
+        return JSONResponse(status_code=400, content={"error": "Field 'text' must be a non-empty string"})
+
+    if len(text_val) > 2000:
+        return JSONResponse(status_code=400, content={"error": "Field 'text' exceeds maximum limit of 2000 characters"})
+
+    result = LLMService.execute_triage(text_val.strip())
+    return result
+
 
 
 # --- General / Public Endpoints ---
